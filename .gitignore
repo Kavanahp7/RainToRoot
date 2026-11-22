@@ -1,14 +1,11 @@
-
 .env
 .env.*
 !.env.example
 
 venv/
 venv312/
+__pycache__/
+*.pyc
 node_modules/
-__pycache__/
-*.pyc
-
-__pycache__/
-*.pyc
 .vscode/
+pyvenv.cfg
