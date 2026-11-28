@@ -1,78 +1,294 @@
-# RainToRoot
+# RainToRoot – Smart Farming and Climate Information Platform
 
-RainToRoot is a React/Vite and Flask/MySQL farming decision-support application. It combines farmer accounts, weather data, soil and crop guidance, farm records, market-data lookup, calculators, and an AI assistant.
+**From every drop of rain to better farming decisions.**
 
-## Project structure
+## About the Project
 
-- `app.py` — Flask application, authentication, profiles, weather proxy, and legacy farmer endpoints.
-- `backend/auth.py` — signed sessions and CSRF checks.
-- `backend/routes/` — AI and farmer-owned farming routes.
-- `backend/services/ai_service.py` — Google Gemini integration.
-- `backend/config/database.py` — MySQL connection helper.
-- `backend/migrations/001_farming_data.sql` — additive soil, crop, and farm-record tables.
-- `frontend/src/` — React pages, dashboard modules, API helper, and styling.
-- `tests/` — backend API and validation tests.
+RainToRoot is a web-based farming decision-support platform designed to help farmers make informed decisions using weather information, soil details, crop suitability, climate-related indicators, market information, farm records, and an AI assistant.
 
-## Features and status
+The platform brings multiple farming-related tools together in one dashboard to support better agricultural planning and resource management.
 
-Implemented:
+## Problem Statement
 
-- Farmer registration, login, logout, profile editing, password hashing, signed sessions, and CSRF protection.
-- Open-Meteo geocoding and seven-day weather forecasts with forecast-based farming guidance.
-- Soil report storage and transparent rule-based crop recommendations.
-- Selected crops and dated crop-growth records.
-- Knowledge hub and simple farming-resource search.
-- Gemini-powered farmer assistant when a valid API key and available model are configured.
-- Mandi lookup through `/api/market-prices` when official data.gov.in credentials are configured.
-- Manual mandi price comparison and farm-profit estimation using values entered by the user.
+Farmers often need information from different sources to decide which crops to grow, understand weather conditions, estimate farming expenses, and check market prices.
 
-Simplified or informational:
+Finding all this information in one place can be difficult. RainToRoot aims to address this by providing a common platform with useful farming information and decision-support tools.
 
-- Climate Risk Analysis uses seven-day forecast indicators and simple thresholds. It is not historical climate prediction, drought forecasting, or an official warning service.
-- Crop recommendations are general rules, not laboratory diagnoses or yield guarantees.
-- Farming Alerts contains informational guidance and farm-record reminders. It does not send real-time browser notifications.
-- The manual price comparison is not live market data and does not predict prices.
+## Project Objectives
 
-Unavailable or planned:
+1. Provide weather and rainfall information.
+2. Help users understand soil characteristics and crop suitability.
+3. Present climate-related risk indicators.
+4. Provide access to mandi price information.
+5. Help estimate farming investment and possible returns.
+6. Provide an AI-based assistant for farming questions.
+7. Store farmer profile and farming information securely.
+8. Make farming-related information accessible through a simple dashboard.
 
-- Secure password reset is not implemented.
-- Historical climate-risk analysis, location-specific crop models, and browser notifications are not implemented.
-- Official mandi results require both `DATA_GOV_IN_API_KEY` and `DATA_GOV_IN_RESOURCE_ID`; without them the API returns `unavailable`.
+## Features and Implementation Status
 
-## Local setup
+### 1. Farmer Registration and Login
+- Farmer registration, login, and logout.
+- Password hashing.
+- Signed sessions and CSRF protection.
+- Profile viewing and editing.
 
-Requirements: Python 3.12, Node.js/npm, MySQL, and internet access for Open-Meteo, Gemini, or official market data.
+### 2. Weather and Rainfall
+- Location search using Open-Meteo geocoding.
+- Seven-day weather forecasts.
+- Temperature, humidity, rainfall, and wind information.
+- Forecast-based farming guidance.
 
-1. Create `backend/.env` from `backend/.env.example`. Do not commit it or expose its values.
-2. Create the existing `farmers` table in the `raintoroot` database before running the migration. The migration depends on that table for foreign keys.
-3. Apply the additive migration:
+### 3. Soil Health and Crop Recommendation
+- Soil report storage.
+- Rule-based crop recommendations.
+- General soil and crop suitability information.
+- Selected crop storage.
 
-   `venv312\Scripts\python.exe backend\migrate.py`
+### 4. Climate Risk Analysis
+- Weather-related indicators based on the seven-day forecast.
+- Simple rainfall and temperature thresholds.
 
-4. Start the backend:
+This is simplified analysis, not historical climate prediction, drought forecasting, or an official warning service.
 
-   `venv312\Scripts\python.exe app.py`
+### 5. Crop Growth and Farm Management
+- Selected crop management.
+- Dated crop-growth and farm records.
+- Farmer-specific data storage.
 
-5. In `frontend`, create `.env.local` from `.env.example`, run `npm install`, and run `npm run dev`.
+### 6. Mandi Prices and Farm Economics
+- Mandi lookup through the official data.gov.in API when the required credentials are configured.
+- Manual mandi price comparison.
+- Farm-profit estimation using user-entered values.
 
-The migration uses `CREATE TABLE IF NOT EXISTS`, adds only the four farming tables, preserves existing farmer records, and does not drop or overwrite data.
+Manual values are not live official market prices.
 
-## Configuration
+### 7. AI Farmer Assistant
+- AI assistant interface for farming-related questions.
+- Google Gemini API integration through the Flask backend.
+- Responses depend on API configuration and service availability.
 
-Important backend variables include `SECRET_KEY`, `FRONTEND_ORIGIN`, MySQL settings, `GEMINI_API_KEY`, and optionally `GEMINI_MODEL`. Live mandi lookup additionally uses `DATA_GOV_IN_API_KEY` and `DATA_GOV_IN_RESOURCE_ID`.
+### 8. Farmer Knowledge Hub and Search
+- Farming information and educational resources.
+- Simple farming-resource search.
 
-For production, use an explicit HTTPS frontend origin, secure cross-site session-cookie settings, and a strong secret key. Set the frontend `VITE_API_URL` to the deployed backend URL.
+### 9. Farming Alerts and Pesticide Safety
+- Informational farming guidance and farm-record reminders.
+- Pesticide safety and awareness information.
+
+Farming Alerts does not currently send real-time browser notifications.
+
+## Technology Stack
+
+| Component | Technology |
+|---|---|
+| Frontend | React.js, Vite, JavaScript |
+| Styling | CSS |
+| Backend | Python, Flask |
+| Database | MySQL |
+| AI Integration | Google Gemini API |
+| Weather Data | Open-Meteo API |
+| Communication | REST APIs |
+| Maps | Leaflet / OpenStreetMap |
+
+## Project Structure
+
+```text
+RainToRoot/
+├── app.py
+├── backend/
+│   ├── auth.py
+│   ├── config/
+│   │   └── database.py
+│   ├── routes/
+│   ├── services/
+│   │   └── ai_service.py
+│   ├── migrations/
+│   │   └── 001_farming_data.sql
+│   └── migrate.py
+├── frontend/
+│   ├── public/
+│   ├── src/
+│   ├── package.json
+│   └── .env.example
+├── tests/
+├── .gitignore
+└── README.md
+```
+
+## Installation and Setup
+
+### Requirements
+- Python 3.12
+- Node.js and npm
+- MySQL Server
+- Visual Studio Code
+- Internet access for external APIs
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/Kavanahp7/RainToRoot.git
+cd RainToRoot
+```
+
+### 2. Configure the Backend
+
+Create your backend environment file using `backend/.env.example`.
+
+Create and activate a Python virtual environment:
+
+```powershell
+py -3.12 -m venv venv
+.\venv\Scripts\Activate.ps1
+```
+
+Install the required packages listed in the project's requirements file.
+
+### 3. Configure MySQL
+
+Create the `raintoroot` database and ensure the existing `farmers` table is available before applying the farming-data migration.
+
+Apply the additive migration:
+
+```powershell
+python backend\migrate.py
+```
+
+The migration creates the additional farming tables without dropping existing farmer records.
+
+### 4. Start the Backend
+
+```powershell
+python app.py
+```
+
+The local backend typically runs at:
+
+```text
+http://127.0.0.1:5000
+```
+
+### 5. Configure and Start the Frontend
+
+Create `frontend/.env.local` using `frontend/.env.example`.
+
+Set the backend API URL as required by the frontend configuration.
+
+Then run:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open the local URL displayed by Vite, usually:
+
+```text
+http://localhost:5173
+```
+
+## Environment Configuration
+
+Important backend environment variables include:
+
+- `SECRET_KEY`
+- `FRONTEND_ORIGIN`
+- MySQL connection settings
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL` (optional)
+- `DATA_GOV_IN_API_KEY` (optional)
+- `DATA_GOV_IN_RESOURCE_ID` (optional)
+
+For production, configure HTTPS, secure session cookies, a strong secret key, and the correct frontend origin.
+
+Set the frontend `VITE_API_URL` to the deployed backend URL.
+
+**Never commit `.env` files or publish API keys, database passwords, or other credentials.**
+
+## API Endpoints
+
+The application includes API routes for:
+
+- Backend status and feature information.
+- Weather information.
+- Farmer registration and authentication.
+- Farmer profile retrieval and updates.
+- Soil reports and crop recommendations.
+- Selected crops and farm records.
+- AI assistant requests.
+- Market-price lookup.
+
+Exact routes and methods are defined in the backend source files.
+
+## How the Project Works
+
+1. A farmer opens the RainToRoot website.
+2. The farmer registers or logs in.
+3. The application displays the dashboard.
+4. The farmer selects a farming module.
+5. The React frontend communicates with the Flask backend through REST APIs.
+6. The backend processes requests and retrieves external information when configured.
+7. MySQL stores farmer account and farming data.
+8. The requested information is returned and displayed on the frontend.
+
+## Security
+
+- Passwords are stored as hashes.
+- Database credentials and API keys are maintained in environment variables.
+- Signed sessions and CSRF protection are used.
+- Farmer-owned data is protected through backend ownership checks.
+- User input is validated by the backend.
 
 ## Verification
 
-From the repository root:
+Run backend tests from the project root:
 
-`venv312\Scripts\python.exe -B -m unittest discover -s tests -v`
+```powershell
+python -B -m unittest discover -s tests -v
+```
 
-From `frontend`:
+Run frontend checks from the `frontend` directory:
 
-`npm.cmd run lint`
+```powershell
+npm.cmd run lint
+npm.cmd run build
+```
 
-`npm.cmd run build`
+Live MySQL, Gemini, Open-Meteo, data.gov.in, and deployed-session behavior require their external services and credentials. Local unit tests do not guarantee those services are working.
 
-Live MySQL, Gemini, Open-Meteo, data.gov.in, and deployed-session behavior require their external services and credentials; they are not guaranteed by the local unit tests.
+## Limitations
+
+- Crop recommendations provide general guidance and are not laboratory diagnoses or yield guarantees.
+- Climate-risk analysis uses short-term forecast indicators rather than historical climate models.
+- Official mandi results require valid data.gov.in credentials.
+- Manual price comparisons are not live market data.
+- Farm-profit calculations are estimates, not guaranteed returns.
+- AI responses depend on Gemini API availability.
+- Farming Alerts currently provides informational guidance rather than real-time browser notifications.
+
+## Future Improvements
+
+- Improve AI assistant reliability.
+- Integrate verified and regularly updated mandi price data.
+- Add historical weather datasets for climate-risk analysis.
+- Improve location-specific crop recommendations.
+- Add more detailed soil analysis.
+- Improve mobile responsiveness.
+- Deploy the frontend and backend for public access.
+
+## Conclusion
+
+RainToRoot brings weather information, soil and crop guidance, climate-related indicators, market information, farm management, and financial estimation tools into one platform.
+
+The project aims to make useful farming information easier to access and support more informed agricultural decisions.
+
+## Project Details
+
+- **Project Name:** RainToRoot
+- **Category:** Smart Agriculture and AgriTech
+- **Development Type:** Full-Stack Web Application
+- **Frontend:** React and Vite
+- **Backend:** Python and Flask
+- **Database:** MySQL
