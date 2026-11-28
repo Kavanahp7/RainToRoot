@@ -1,5 +1,21 @@
 
-import React, { useState } from "react";
+import { useState } from "react";
+import { Chart as ChartJS, CategoryScale, Legend, LineElement, LinearScale, PointElement, Tooltip } from "chart.js";
+import { Line } from "react-chartjs-2";
+import { CircleMarker, MapContainer, Popup, TileLayer } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import { API_URL } from "./api";
+import { CropGrowth, CropRecommendation, FarmingAlerts, KnowledgeHub, SearchModule, SoilHealth } from "./FarmModules";
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
+
+function marketValue(record, names) {
+  const normalizedNames = names.map(name => name.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  const match = Object.entries(record).find(([key]) =>
+    normalizedNames.includes(key.toLowerCase().replace(/[^a-z0-9]/g, ""))
+  );
+  return match?.[1] ?? "Not provided";
+}
 
 export default function Dashboard({
   onHome = () => window.location.reload(),
@@ -18,11 +34,10 @@ export default function Dashboard({
   });
 
   const [profileForm, setProfileForm] = useState({});
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
   const [theme, setTheme] = useState(localStorage.getItem("rtTheme") || "light");
   const [language, setLanguage] = useState(localStorage.getItem("rtLanguage") || "English");
-  const [notifications, setNotifications] = useState(
-    localStorage.getItem("rtNotifications") !== "false"
-  );
 
   const [weatherLocation, setWeatherLocation] = useState(
     [farmer.village, farmer.district, farmer.state].filter(Boolean).join(", ")
@@ -31,6 +46,7 @@ export default function Dashboard({
   const [weatherData, setWeatherData] = useState(null);
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState("");
+  const [weatherCoordinates, setWeatherCoordinates] = useState(null);
 
   const [soilType, setSoilType] = useState(farmer.soilType || "");
   const [season, setSeason] = useState("Monsoon");
@@ -47,8 +63,14 @@ export default function Dashboard({
 
   const [mandiCrop, setMandiCrop] = useState("Tomato");
   const [mandiMarket, setMandiMarket] = useState("");
-  const [previousMandiPrice, setPreviousMandiPrice] = useState("2000");
-  const [currentMandiPrice, setCurrentMandiPrice] = useState("2200");
+  const [mandiState, setMandiState] = useState("");
+  const [mandiDistrict, setMandiDistrict] = useState("");
+  const [mandiRecords, setMandiRecords] = useState([]);
+  const [mandiLoading, setMandiLoading] = useState(false);
+  const [mandiError, setMandiError] = useState("");
+  const [mandiSearched, setMandiSearched] = useState(false);
+  const [previousMandiPrice, setPreviousMandiPrice] = useState("");
+  const [currentMandiPrice, setCurrentMandiPrice] = useState("");
   const [mandiCalculated, setMandiCalculated] = useState(false);
 
   const [profitCrop, setProfitCrop] = useState(farmer.currentCrop || "Tomato");
@@ -254,6 +276,14 @@ export default function Dashboard({
     .rt-side-btn:hover,
     .rt-side-btn.selected { background: #ffffff20; }
 
+    .rt-side-section {
+      color: #9bc77b;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      margin: 20px 12px 5px;
+    }
+
     .rt-logout-btn {
       margin-top: auto;
       color: #ffd6d6;
@@ -444,6 +474,8 @@ export default function Dashboard({
 
     .rt-bot { background: #e8f1e7; align-self: flex-start; }
     .rt-user { background: #164f35; color: white; align-self: flex-end; }
+    .rt-error-msg { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
+    .rt-page.dark .rt-error-msg { background: #4a2121; color: #ffcdd2; border: 1px solid #7f2c2c; }
 
     .rt-chatrow { display: flex; gap: 10px; margin-top: 14px; }
     .rt-chatrow input { flex: 1; min-width: 0; }
@@ -582,6 +614,7 @@ export default function Dashboard({
   }
 
   function openProfile() {
+    setProfileError("");
     setProfileForm({
       name: farmer.name || "",
       email: farmer.email || "",
@@ -598,14 +631,57 @@ export default function Dashboard({
     setActive("");
   }
 
-  function saveProfile(e) {
+  async function saveProfile(e) {
     e.preventDefault();
+    if (profileSaving) return;
+    setProfileSaving(true);
+    setProfileError("");
 
-    const updated = { ...farmer, ...profileForm };
+    const body = {
+      name: profileForm.name?.trim(),
+      village: profileForm.village?.trim() || null,
+      district: profileForm.district?.trim() || null,
+      state: profileForm.state?.trim() || null,
+      land_size: profileForm.landSize === "" ? null : Number(profileForm.landSize),
+      soil_type: profileForm.soilType || null,
+      current_crop: profileForm.currentCrop?.trim() || null,
+      irrigation: profileForm.irrigation || null
+    };
 
-    localStorage.setItem("raintorootFarmer", JSON.stringify(updated));
-    setFarmer(updated);
-    setSoilType(updated.soilType || "");
+    try {
+      const response = await fetch(`${API_URL}/api/farmers/${farmer.farmer_id}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": localStorage.getItem("raintorootCsrf") || ""
+        },
+        body: JSON.stringify(body)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to save your profile.");
+
+      const refreshedResponse = await fetch(`${API_URL}/api/auth/me`, { credentials: "include" });
+      const refreshed = await refreshedResponse.json();
+      if (!refreshedResponse.ok || !refreshed.farmer) {
+        throw new Error("Profile was saved, but could not be reloaded.");
+      }
+      const updated = {
+        farmer_id: refreshed.farmer.id,
+        name: refreshed.farmer.name || "",
+        email: refreshed.farmer.email || "",
+        village: refreshed.farmer.village || "",
+        district: refreshed.farmer.district || "",
+        state: refreshed.farmer.state || "",
+        landSize: refreshed.farmer.land_size ?? "",
+        soilType: refreshed.farmer.soil_type || "",
+        currentCrop: refreshed.farmer.current_crop || "",
+        irrigation: refreshed.farmer.irrigation || ""
+      };
+
+      localStorage.setItem("raintorootFarmer", JSON.stringify(updated));
+      setFarmer(updated);
+      setSoilType(updated.soilType || "");
 
     const location = [
       updated.village,
@@ -613,15 +689,20 @@ export default function Dashboard({
       updated.state
     ].filter(Boolean).join(", ");
 
-    setWeatherLocation(location);
-    setWeatherData(null);
-    setWeatherSearched(false);
-    setWeatherError("");
-    setClimateLocation(location);
-    setClimateData(null);
-    setClimateChecked(false);
-    setClimateError("");
-    setShowProfile(false);
+      setWeatherLocation(location);
+      setWeatherData(null);
+      setWeatherSearched(false);
+      setWeatherError("");
+      setClimateLocation(location);
+      setClimateData(null);
+      setClimateChecked(false);
+      setClimateError("");
+      setShowProfile(false);
+    } catch (error) {
+      setProfileError(error.message || "Unable to save your profile.");
+    } finally {
+      setProfileSaving(false);
+    }
   }
 
   function updateProfileField(e) {
@@ -637,11 +718,6 @@ export default function Dashboard({
   function updateLanguage(value) {
     setLanguage(value);
     localStorage.setItem("rtLanguage", value);
-  }
-
-  function updateNotifications(value) {
-    setNotifications(value);
-    localStorage.setItem("rtNotifications", String(value));
   }
 
   async function searchWeather() {
@@ -672,7 +748,7 @@ export default function Dashboard({
       const place = geoData.results[0];
 
       const response = await fetch(
-        `http://127.0.0.1:5000/api/weather?latitude=${place.latitude}&longitude=${place.longitude}`
+        `${API_URL}/api/weather?latitude=${place.latitude}&longitude=${place.longitude}`
       );
 
       const data = await response.json();
@@ -690,6 +766,7 @@ export default function Dashboard({
           .filter(Boolean)
           .join(", ")
       );
+      setWeatherCoordinates([place.latitude, place.longitude]);
 
       setWeatherData(data.weather);
       setWeatherSearched(true);
@@ -726,7 +803,7 @@ export default function Dashboard({
       const place = geoData.results[0];
 
       const response = await fetch(
-        `http://127.0.0.1:5000/api/weather?latitude=${place.latitude}&longitude=${place.longitude}`
+        `${API_URL}/api/weather?latitude=${place.latitude}&longitude=${place.longitude}`
       );
 
       const data = await response.json();
@@ -778,17 +855,27 @@ export default function Dashboard({
     setAssistantLoading(true);
 
     try {
-      const response = await fetch("http://127.0.0.1:5000/api/assistant", {
+      const chatHistory = messages
+        .filter(m => !m.isError && m.text !== "Welcome to RainToRoot Farmer Assistant! Ask about crops, soil, rainfall, irrigation and farming calculations.")
+        .slice(-6)
+        .map(m => ({
+          role: m.from === "bot" ? "model" : "user",
+          text: m.text
+        }));
+
+      const response = await fetch(`${API_URL}/api/assistant`, {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "X-CSRF-Token": localStorage.getItem("raintorootCsrf") || ""
         },
-        body: JSON.stringify({ question: userText })
+        body: JSON.stringify({ question: userText, history: chatHistory })
       });
 
       const data = await response.json();
 
-      if (!response.ok) {
+      if (!response.ok || !data.success) {
         throw new Error(data.error || "Unable to process your question.");
       }
 
@@ -800,11 +887,17 @@ export default function Dashboard({
         }
       ]);
     } catch (error) {
+      let displayError = error.message;
+      if (!displayError || displayError === "Failed to fetch" || displayError.includes("NetworkError")) {
+        displayError = "Unable to connect to the backend server. Please check your internet connection or verify the server is running.";
+      }
+
       setMessages(old => [
         ...old,
         {
           from: "bot",
-          text: "The AI service is temporarily unavailable. Please try again later."
+          text: `⚠️ ${displayError}`,
+          isError: true
         }
       ]);
 
@@ -846,6 +939,36 @@ export default function Dashboard({
     setMandiCalculated(true);
   }
 
+  async function searchMandiPrices(e) {
+    e.preventDefault();
+    setMandiLoading(true);
+    setMandiError("");
+    setMandiRecords([]);
+    setMandiSearched(false);
+
+    const params = new URLSearchParams();
+    if (mandiState.trim()) params.set("state", mandiState.trim());
+    if (mandiDistrict.trim()) params.set("district", mandiDistrict.trim());
+    if (mandiMarket.trim()) params.set("market", mandiMarket.trim());
+    if (mandiCrop.trim()) params.set("commodity", mandiCrop.trim());
+
+    try {
+      const response = await fetch(`${API_URL}/api/market-prices?${params.toString()}`, {
+        credentials: "include"
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || "Official market data is unavailable right now.");
+      }
+      setMandiRecords(Array.isArray(data.records) ? data.records : []);
+      setMandiSearched(true);
+    } catch (error) {
+      setMandiError(error.message || "Official market data is unavailable right now.");
+    } finally {
+      setMandiLoading(false);
+    }
+  }
+
   function formatWeatherDate(dateString) {
     return new Date(`${dateString}T00:00:00`).toLocaleDateString("en-IN", {
       weekday: "short",
@@ -856,6 +979,20 @@ export default function Dashboard({
 
   function renderModule() {
     switch (active) {
+      case "Soil Health & Testing":
+        return <SoilHealth />;
+      case "Smart Crop Recommendation":
+        return <CropRecommendation />;
+      case "Crop Growth & Farm Management":
+        return <CropGrowth />;
+      case "Search":
+        return <SearchModule />;
+      case "Farmer Knowledge Hub":
+        return <KnowledgeHub />;
+      case "Pesticide Safety & Awareness":
+        return <KnowledgeHub safety />;
+      case "Farming Alerts":
+        return <FarmingAlerts />;
       case "Rainfall & Weather":
         return (
           <>
@@ -904,7 +1041,7 @@ export default function Dashboard({
               <div className="rt-result">
                 <h3>Weather Monitoring</h3>
                 Enter your farming location and select Search Weather to view
-                current conditions and the three-day forecast.
+                current conditions and the seven-day forecast.
               </div>
             )}
 
@@ -950,8 +1087,31 @@ export default function Dashboard({
                 </div>
 
                 <h2 className="rt-heading" style={{ marginTop: 30 }}>
-                  Three-Day Weather Forecast
+                  Seven-Day Weather Forecast
                 </h2>
+
+                <div className="rt-card" style={{ marginBottom: 20 }}>
+                  <Line
+                    data={{
+                      labels: weatherData.daily.time.map(formatWeatherDate),
+                      datasets: [
+                        { label: "Maximum temperature (°C)", data: weatherData.daily.temperature_2m_max, borderColor: "#267446", backgroundColor: "#267446", tension: 0.25 },
+                        { label: "Rain probability (%)", data: weatherData.daily.precipitation_probability_max, borderColor: "#2b7bb9", backgroundColor: "#2b7bb9", tension: 0.25 }
+                      ]
+                    }}
+                    options={{ responsive: true, plugins: { legend: { position: "bottom" } } }}
+                  />
+                </div>
+
+                {weatherCoordinates && (
+                  <div className="rt-card" style={{ marginBottom: 20 }}>
+                    <h3>Forecast location</h3>
+                    <MapContainer center={weatherCoordinates} zoom={8} style={{ height: 260, width: "100%" }}>
+                      <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                      <CircleMarker center={weatherCoordinates} radius={9} pathOptions={{ color: "#267446" }}><Popup>{weatherLocation}</Popup></CircleMarker>
+                    </MapContainer>
+                  </div>
+                )}
 
                 <div className="rt-grid">
                   {weatherData.daily.time.map((day, index) => (
@@ -1149,6 +1309,14 @@ export default function Dashboard({
           },
           {
             icon: "💨",
+            title: "Wind Risk",
+            status: windRisk,
+            description: Number.isFinite(windSpeed)
+              ? `Maximum forecast wind speed: ${windSpeed} km/h.`
+              : "Wind-speed data is unavailable."
+          },
+          {
+            icon: "💨",
             title: "Strong Wind Indicator",
             status: getRisk(windSpeed, 25, 40),
             description:
@@ -1175,8 +1343,9 @@ export default function Dashboard({
             <h1>Climate Risk Analysis</h1>
 
             <p className="rt-muted">
-              Analyse short-term weather indicators that may affect farming
-              conditions in your selected location.
+              Analyse seven-day forecast indicators that may affect farming
+              conditions. This is not historical climate prediction or an
+              official warning service.
             </p>
 
             <div className="rt-card" style={{ marginTop: 20 }}>
@@ -1235,10 +1404,10 @@ export default function Dashboard({
             {climateChecked && climateData && (
               <>
                 <div className="rt-result">
-                  <h3>Analysis Results</h3>
+                  <h3>Seven-day forecast analysis</h3>
                   <p><strong>Location:</strong> {climateLocation}</p>
                   <p><strong>Growing Season:</strong> {climateSeason}</p>
-                  <p><strong>Forecast Period:</strong> Three days</p>
+                  <p><strong>Forecast Period:</strong> Seven days</p>
                   <span className="rt-status">
                     Weather analysis completed
                   </span>
@@ -1260,7 +1429,7 @@ export default function Dashboard({
                 </div>
 
                 <h2 className="rt-heading" style={{ marginTop: 28 }}>
-                  Three-Day Weather Indicators
+                  Seven-Day Weather Indicators
                 </h2>
 
                 <div className="rt-grid">
@@ -1328,10 +1497,53 @@ export default function Dashboard({
       case "Mandi Price Tracker":
         return (
           <>
-            <h1>Mandi Price Trend Calculator</h1>
+            <h1>Mandi Price Tracker</h1>
             <p className="rt-muted">
-              Enter two market prices to calculate how the price of a crop has changed.
+              Search official market records when the data.gov.in integration is configured.
             </p>
+
+            <form onSubmit={searchMandiPrices}>
+              <div className="rt-card" style={{ marginTop: 20 }}>
+                <h3>Official market data lookup</h3>
+                <label className="rt-label">Commodity</label>
+                <input className="rt-input" value={mandiCrop} onChange={e => setMandiCrop(e.target.value)} placeholder="Example: Tomato" required />
+                <label className="rt-label">Market</label>
+                <input className="rt-input" value={mandiMarket} onChange={e => setMandiMarket(e.target.value)} placeholder="Optional market name" />
+                <label className="rt-label">State</label>
+                <input className="rt-input" value={mandiState} onChange={e => setMandiState(e.target.value)} placeholder="Optional state" />
+                <label className="rt-label">District</label>
+                <input className="rt-input" value={mandiDistrict} onChange={e => setMandiDistrict(e.target.value)} placeholder="Optional district" />
+                <button className="rt-btn" type="submit" disabled={mandiLoading}>
+                  {mandiLoading ? "Loading market data..." : "Search official prices"}
+                </button>
+              </div>
+            </form>
+
+            {mandiError && <p className="rt-error-msg" role="alert">{mandiError}</p>}
+            {mandiSearched && !mandiError && !mandiRecords.length && (
+              <div className="rt-result">No official market records matched this search.</div>
+            )}
+            {mandiRecords.length > 0 && (
+              <div className="rt-card" style={{ marginTop: 20, overflowX: "auto" }}>
+                <h3>Official market records</h3>
+                <table className="rt-table">
+                  <thead><tr><th>Market</th><th>Commodity</th><th>Price</th><th>Date</th></tr></thead>
+                  <tbody>
+                    {mandiRecords.map((record, index) => (
+                      <tr key={`${marketValue(record, ["Market", "market"])}-${index}`}>
+                        <td>{marketValue(record, ["Market", "market", "Mandi"])}</td>
+                        <td>{marketValue(record, ["Commodity", "commodity"])} </td>
+                        <td>₹{marketValue(record, ["Modal Price", "Modal_Price", "Price", "Max Price", "Min Price"])}</td>
+                        <td>{marketValue(record, ["Arrival Date", "Arrival_Date", "Date", "date"])}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <h2 className="rt-heading" style={{ marginTop: 28 }}>Manual price comparison</h2>
+            <p className="rt-muted">This separate calculator uses only values you enter. It is not live market data.</p>
 
             <form onSubmit={calculateMandiTrend}>
               <div className="rt-card" style={{ marginTop: 20 }}>
@@ -1433,11 +1645,7 @@ export default function Dashboard({
               </div>
             )}
 
-            <p className="rt-note">
-              This module calculates price changes using the values entered by
-              the user. It does not retrieve live mandi prices or predict future
-              prices. Enter verified market prices for meaningful comparisons.
-            </p>
+            <p className="rt-note">Official records depend on data.gov.in availability and configuration. The manual comparison does not retrieve or generate live prices.</p>
           </>
         );
 
@@ -1591,15 +1799,15 @@ export default function Dashboard({
               {messages.map((m, i) => (
                 <div
                   key={i}
-                  className={`rt-message ${m.from === "bot" ? "rt-bot" : "rt-user"}`}
+                  className={`rt-message ${m.from === "bot" ? "rt-bot" : "rt-user"} ${m.isError ? "rt-error-msg" : ""}`}
                 >
                   {m.text}
                 </div>
               ))}
 
               {assistantLoading && (
-                <div className="rt-message rt-bot">
-                  Gemini is preparing your answer...
+                <div className="rt-message rt-bot" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span>🌱</span> Gemini is preparing your farming guidance...
                 </div>
               )}
             </div>
@@ -1620,6 +1828,13 @@ export default function Dashboard({
                 disabled={assistantLoading || !question.trim()}
               >
                 {assistantLoading ? "Thinking..." : "Send"}
+              </button>
+              <button
+                className="rt-outline"
+                onClick={() => setMessages([{ from: "bot", text: "Welcome to RainToRoot Farmer Assistant! Ask about crops, soil, rainfall, irrigation and farming calculations." }])}
+                disabled={assistantLoading}
+              >
+                Clear chat
               </button>
             </div>
 
@@ -1648,10 +1863,19 @@ export default function Dashboard({
           </div>
 
           <div className="rt-sidebar-user">
-            <div style={{ fontSize: 32 }}>👤</div>
             <h3>{farmer.name || "Farmer"}</h3>
             <p>{farmer.email || "Welcome to RainToRoot"}</p>
           </div>
+
+          <p className="rt-side-section">TOOLS</p>
+          {[
+            ["Search", "Search"],
+            ["Farmer Knowledge Hub", "Farmer Knowledge Hub"],
+            ["Pesticide Safety & Awareness", "Pesticide Safety & Awareness"],
+            ["Farming Alerts", "Farming Alerts"]
+          ].map(([label, module]) => <button key={label} className={`rt-side-btn ${active === module ? "selected" : ""}`} onClick={() => openModule(module)}>{label}</button>)}
+
+          <p className="rt-side-section">ACCOUNT</p>
 
           <button
             className={`rt-side-btn ${showProfile ? "selected" : ""}`}
@@ -1744,8 +1968,10 @@ export default function Dashboard({
               <section className="rt-module">
                 <h1>My Profile</h1>
                 <p className="rt-muted">
-                  Edit your personal and farming information below.
+                  Edit your personal and farming information below. Your email address is used for sign-in and cannot be changed here.
                 </p>
+
+                {profileError && <p className="rt-error-msg" role="alert">{profileError}</p>}
 
                 <form onSubmit={saveProfile}>
                   <div className="rt-profile-grid">
@@ -1768,6 +1994,7 @@ export default function Dashboard({
                           onChange={updateProfileField}
                           placeholder={placeholder}
                           required={["name", "email"].includes(name)}
+                          readOnly={name === "email"}
                         />
                       </div>
                     ))}
@@ -1818,8 +2045,8 @@ export default function Dashboard({
                   </div>
 
                   <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-                    <button className="rt-btn" type="submit">
-                      Save Changes
+                    <button className="rt-btn" type="submit" disabled={profileSaving}>
+                      {profileSaving ? "Saving..." : "Save Changes"}
                     </button>
 
                     <button
@@ -1855,15 +2082,13 @@ export default function Dashboard({
 
                 <div className="rt-card rt-setting-card">
                   <h3>Language</h3>
-                  <label className="rt-label">Choose your preferred language</label>
+                  <p className="rt-muted">English is currently supported. Kannada and Hindi will be enabled only when complete translations are available.</p>
                   <select
                     className="rt-input"
                     value={language}
                     onChange={e => updateLanguage(e.target.value)}
                   >
                     <option value="English">English</option>
-                    <option value="Kannada">Kannada</option>
-                    <option value="Hindi">Hindi</option>
                   </select>
                 </div>
 
@@ -1882,14 +2107,14 @@ export default function Dashboard({
 
                 <div className="rt-card rt-setting-card">
                   <h3>Notifications</h3>
-                  <p>Manage your notification preference.</p>
+                  <p className="rt-muted">Browser notifications are not active yet. Weather and crop reminders are available inside Farming Alerts.</p>
                   <label className="rt-checkbox">
                     <input
                       type="checkbox"
-                      checked={notifications}
-                      onChange={e => updateNotifications(e.target.checked)}
+                      checked={false}
+                      disabled
                     />
-                    Enable Notifications
+                    Notifications unavailable
                   </label>
                 </div>
               </section>

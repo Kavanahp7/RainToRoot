@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 280" width="420" height="280" role="img" aria-label="Lush green terraced farm fields under gentle rain">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#dcebd9"/>
+      <stop offset="100%" stop-color="#f7faf6"/>
+    </linearGradient>
+    <linearGradient id="hill1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4d9360"/>
+      <stop offset="100%" stop-color="#236b49"/>
+    </linearGradient>
+    <linearGradient id="hill2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#75a94c"/>
+      <stop offset="100%" stop-color="#164f35"/>
+    </linearGradient>
+  </defs>
+  <rect width="420" height="280" rx="16" fill="url(#sky)"/>
+  <circle cx="340" cy="62" r="30" fill="#f3c65f" opacity="0.85"/>
+  <circle cx="340" cy="62" r="42" fill="#f3c65f" opacity="0.22"/>
+  <g fill="#ffffff" opacity="0.9">
+    <ellipse cx="110" cy="58" rx="38" ry="16"/>
+    <ellipse cx="136" cy="52" rx="28" ry="18"/>
+    <ellipse cx="86" cy="60" rx="24" ry="13"/>
+    <ellipse cx="220" cy="44" rx="30" ry="12"/>
+    <ellipse cx="242" cy="40" rx="22" ry="14"/>
+  </g>
+  <g stroke="#2b7bb9" stroke-width="2.5" stroke-linecap="round" opacity="0.65">
+    <line x1="95" y1="84" x2="89" y2="100"/>
+    <line x1="120" y1="88" x2="114" y2="104"/>
+    <line x1="145" y1="82" x2="139" y2="98"/>
+    <line x1="215" y1="70" x2="209" y2="86"/>
+    <line x1="240" y1="74" x2="234" y2="90"/>
+  </g>
+  <path d="M0,185 Q110,135 230,175 T420,160 L420,280 L0,280 Z" fill="url(#hill1)"/>
+  <path d="M0,215 Q140,170 270,210 T420,195 L420,280 L0,280 Z" fill="url(#hill2)"/>
+  <path d="M0,245 Q170,220 310,245 T420,235 L420,280 L0,280 Z" fill="#123c27"/>
+  <g fill="none" stroke="#a6d482" stroke-width="2" opacity="0.65">
+    <path d="M20,225 Q140,192 265,222"/>
+    <path d="M15,242 Q145,212 280,238"/>
+    <path d="M25,260 Q160,238 300,258"/>
+  </g>
+  <g transform="translate(310, 195)">
+    <line x1="0" y1="22" x2="0" y2="-4" stroke="#d8f0c8" stroke-width="3" stroke-linecap="round"/>
+    <path d="M0,4 C-12,-6 -16,-14 -4,-16 C2,-16 4,-6 0,4 Z" fill="#a6d482"/>
+    <path d="M0,0 C12,-10 18,-16 6,-18 C0,-18 -2,-8 0,0 Z" fill="#75a94c"/>
+  </g>
+  <g transform="translate(80, 208)">
+    <line x1="0" y1="18" x2="0" y2="-2" stroke="#d8f0c8" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M0,4 C-10,-4 -12,-11 -2,-13 C3,-13 4,-4 0,4 Z" fill="#a6d482"/>
+    <path d="M0,1 C10,-7 14,-12 4,-14 C-1,-14 -2,-6 0,1 Z" fill="#75a94c"/>
+  </g>
+</svg>

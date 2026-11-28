@@ -1,9 +1,33 @@
 import os
+import sys
+import re
+import secrets
 from pathlib import Path
 from urllib.parse import urlencode
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+# Determine directories dynamically whether running from root or backend/
+CURRENT_DIR = Path(__file__).resolve().parent
+if (CURRENT_DIR / "backend").exists():
+    ROOT_DIR = CURRENT_DIR
+    BACKEND_DIR = CURRENT_DIR / "backend"
+else:
+    BACKEND_DIR = CURRENT_DIR
+    ROOT_DIR = CURRENT_DIR.parent
+
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+# Requirement 1: Load backend/.env first for secret credentials
+backend_env = BACKEND_DIR / ".env"
+root_env = ROOT_DIR / ".env"
+
+if backend_env.exists():
+    load_dotenv(backend_env)
+elif root_env.exists():
+    load_dotenv(root_env)
+else:
+    load_dotenv()
 
 import json
 
@@ -12,19 +36,69 @@ from datetime import datetime
 from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request, session
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 from mysql.connector import Error
 
 from backend.config.database import get_db_connection
+from backend.auth import clear_session, establish_session, require_auth, require_csrf
 from backend.routes.ai_routes import ai_bp
+from backend.routes.farm_routes import farm_bp
+from backend.routes.password_reset_routes import password_reset_bp
 
 
 app = Flask(__name__)
-CORS(app)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+is_production = (
+    os.getenv("FLASK_ENV", "development").lower() == "production"
+    or os.getenv("RENDER", "").lower() == "true"
+)
+secret_key = os.getenv("SECRET_KEY", "").strip()
+if not secret_key:
+    if is_production:
+        raise RuntimeError("SECRET_KEY must be configured when running in production.")
+    secret_key = secrets.token_urlsafe(32)
+
+# Configure CORS using FRONTEND_ORIGIN
+frontend_origins_raw = os.getenv(
+    "FRONTEND_ORIGIN",
+    "" if is_production else "http://localhost:5173,http://127.0.0.1:5173"
+)
+frontend_origins = [
+    origin.strip().rstrip("/") for origin in frontend_origins_raw.split(",") if origin.strip()
+]
+
+if not frontend_origins or "*" in frontend_origins:
+    raise RuntimeError("Set explicit FRONTEND_ORIGIN values; wildcard CORS is not supported.")
+
+has_https_origin = any(origin.startswith("https://") for origin in frontend_origins)
+use_cross_site_cookies = is_production or has_https_origin
+cookie_samesite = os.getenv(
+    "SESSION_COOKIE_SAMESITE",
+    "None" if use_cross_site_cookies else "Lax"
+)
+cookie_secure = os.getenv(
+    "SESSION_COOKIE_SECURE",
+    "True" if (use_cross_site_cookies or cookie_samesite.lower() == "none") else "False"
+).lower() in ("true", "1", "yes")
+if cookie_samesite.lower() == "none":
+    cookie_secure = True
+
+app.config.update(
+    SECRET_KEY=secret_key,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SECURE=cookie_secure,
+    SESSION_COOKIE_SAMESITE=cookie_samesite,
+    PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 7,
+)
+
+CORS(app, origins=frontend_origins, supports_credentials=True)
 
 app.register_blueprint(ai_bp)
+app.register_blueprint(farm_bp)
+app.register_blueprint(password_reset_bp)
 
 
 # CONVERT DATABASE VALUES INTO JSON-SAFE VALUES
@@ -42,6 +116,17 @@ def serialize_farmer(farmer):
             farmer[key] = value.isoformat()
 
     return farmer
+
+
+def text_value(data, field, maximum=255):
+    value = data.get(field, "")
+    if not isinstance(value, str):
+        return ""
+    return value.strip()[:maximum]
+
+
+def valid_email(email):
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email))
 
 
 # HOME
@@ -82,23 +167,31 @@ def get_weather():
         if not -180 <= longitude <= 180:
             return jsonify({"error": "Invalid longitude."}), 400
 
-        url = (
-            "https://api.open-meteo.com/v1/forecast"
-            f"?latitude={latitude}&longitude={longitude}"
-            "&current=temperature_2m,relative_humidity_2m,"
-            "apparent_temperature,precipitation,rain,weather_code,"
-            "wind_speed_10m"
-            "&daily=temperature_2m_max,temperature_2m_min,"
-            "precipitation_probability_max"
-            "&forecast_days=3&timezone=auto"
-        )
+        weather_params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current": "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,rain,weather_code,wind_speed_10m",
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max",
+            "forecast_days": 7,
+            "timezone": "auto",
+        }
+        url = f"https://api.open-meteo.com/v1/forecast?{urlencode(weather_params)}"
 
         with urlopen(url, timeout=15) as response:
             weather = json.loads(response.read().decode("utf-8"))
 
+        current = weather.get("current", {})
+        guidance = []
+        if current.get("rain", 0) >= 5:
+            guidance.append("Rainfall is being reported. Avoid field operations that compact wet soil and check drainage.")
+        if current.get("wind_speed_10m", 0) >= 25:
+            guidance.append("Strong wind is being reported. Secure loose covers and avoid spray decisions until conditions are suitable.")
+        if not guidance:
+            guidance.append("Use this forecast together with field observations before planning irrigation or crop work.")
         return jsonify({
             "message": "Weather data retrieved successfully.",
-            "weather": weather
+            "weather": weather,
+            "guidance": guidance,
         })
 
     except (TypeError, ValueError):
@@ -123,14 +216,17 @@ def get_weather():
 def create_farmer():
     data = request.get_json(silent=True) or {}
 
-    name = data.get("name", "").strip()
-    email = data.get("email", "").strip().lower()
-    password = data.get("password", "")
+    name = text_value(data, "name", 100)
+    email = text_value(data, "email", 150).lower()
+    password = data.get("password", "") if isinstance(data.get("password", ""), str) else ""
 
     if not name or not email or not password:
         return jsonify({
             "error": "Name, email and password are required."
         }), 400
+
+    if not valid_email(email):
+        return jsonify({"error": "Please provide a valid email address."}), 400
 
     if len(password) < 8:
         return jsonify({
@@ -145,6 +241,15 @@ def create_farmer():
     try:
         connection = get_db_connection()
         cursor = connection.cursor()
+
+        cursor.execute(
+            "SELECT id FROM farmers WHERE LOWER(TRIM(email)) = %s LIMIT 1",
+            (email,)
+        )
+        if cursor.fetchone():
+            return jsonify({
+                "error": "This email is already registered."
+            }), 409
 
         query = """
             INSERT INTO farmers
@@ -183,7 +288,8 @@ def create_farmer():
 
         return jsonify({
             "message": "Account created successfully!",
-            "farmer": serialize_farmer(farmer)
+            "farmer": serialize_farmer(farmer),
+            "csrf_token": establish_session(farmer_id),
         }), 201
 
     except Error as error:
@@ -209,8 +315,8 @@ def create_farmer():
 def login_farmer():
     data = request.get_json(silent=True) or {}
 
-    email = data.get("email", "").strip().lower()
-    password = data.get("password", "")
+    email = text_value(data, "email", 150).lower()
+    password = data.get("password", "") if isinstance(data.get("password", ""), str) else ""
 
     if not email or not password:
         return jsonify({
@@ -225,7 +331,7 @@ def login_farmer():
         cursor = connection.cursor(dictionary=True)
 
         cursor.execute(
-            "SELECT * FROM farmers WHERE email = %s",
+            "SELECT * FROM farmers WHERE LOWER(TRIM(email)) = %s LIMIT 1",
             (email,)
         )
 
@@ -245,7 +351,8 @@ def login_farmer():
 
         return jsonify({
             "message": "Login successful!",
-            "farmer": serialize_farmer(farmer)
+            "farmer": serialize_farmer(farmer),
+            "csrf_token": establish_session(farmer["id"]),
         }), 200
 
     except Error as error:
@@ -261,9 +368,40 @@ def login_farmer():
             connection.close()
 
 
-# GET FARMER PROFILE
+# AUTHENTICATED FARMER PROFILE
+@app.route("/api/auth/me", methods=["GET"])
+@require_auth
+def get_current_farmer():
+    connection = None
+    cursor = None
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM farmers WHERE id = %s", (g.farmer_id,))
+        farmer = cursor.fetchone()
+        if not farmer:
+            clear_session()
+            return jsonify({"error": "Farmer account not found."}), 401
+        csrf_token = session.get("csrf_token")
+        if not csrf_token:
+            csrf_token = secrets.token_urlsafe(32)
+            session["csrf_token"] = csrf_token
+        return jsonify({"farmer": serialize_farmer(farmer), "csrf_token": csrf_token})
+    except Error:
+        return jsonify({"error": "Unable to retrieve farmer profile."}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+# GET FARMER PROFILE (kept for compatibility; only the signed-in farmer is allowed)
 @app.route("/api/farmers/<int:farmer_id>", methods=["GET"])
+@require_auth
 def get_farmer(farmer_id):
+    if farmer_id != g.farmer_id:
+        return jsonify({"error": "You can only access your own profile."}), 403
     connection = None
     cursor = None
 
@@ -302,7 +440,11 @@ def get_farmer(farmer_id):
 
 # UPDATE FARMER PROFILE
 @app.route("/api/farmers/<int:farmer_id>", methods=["PUT"])
+@require_auth
+@require_csrf
 def update_farmer(farmer_id):
+    if farmer_id != g.farmer_id:
+        return jsonify({"error": "You can only update your own profile."}), 403
     data = request.get_json(silent=True) or {}
 
     allowed_fields = [
@@ -320,6 +462,21 @@ def update_farmer(farmer_id):
         return jsonify({
             "error": "No valid fields provided."
         }), 400
+
+    if "name" in updates:
+        updates["name"] = text_value(data, "name", 100)
+        if not updates["name"]:
+            return jsonify({"error": "Name cannot be empty."}), 400
+    for field, maximum in (("village", 100), ("district", 100), ("state", 100), ("soil_type", 100), ("current_crop", 100), ("irrigation", 100)):
+        if field in updates:
+            updates[field] = text_value(data, field, maximum) or None
+    if "land_size" in updates:
+        try:
+            updates["land_size"] = float(updates["land_size"]) if updates["land_size"] not in (None, "") else None
+            if updates["land_size"] is not None and updates["land_size"] < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"error": "Land size must be a non-negative number."}), 400
 
     connection = None
     cursor = None
@@ -369,5 +526,15 @@ def update_farmer(farmer_id):
             connection.close()
 
 
+@app.route("/api/logout", methods=["POST"])
+@require_auth
+@require_csrf
+def logout_farmer():
+    clear_session()
+    return jsonify({"message": "Logged out successfully."})
+
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    port = int(os.getenv("PORT", 5000))
+    debug = os.getenv("FLASK_DEBUG", "False").lower() in ("true", "1", "yes") and not is_production
+    app.run(host="0.0.0.0", port=port, debug=debug)
